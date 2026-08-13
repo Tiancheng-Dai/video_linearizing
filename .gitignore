@@ -1,0 +1,11 @@
+# Nested git repos (own remotes, not part of this project)
+kinetics_i3d_pytorch/
+.legacy/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Large local data, not versioned here
+video_dataset/
