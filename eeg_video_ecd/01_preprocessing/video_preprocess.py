@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-from video_preprocess_util import preprocess_frame, write_video_from_frame_dir
+from video_preprocess_util import preprocess_frame, optic_flow
 
 TARGET_SIZE = 224
 
@@ -19,7 +19,11 @@ default_project_dir = os.path.abspath(os.path.join(script_dir, '..', '..'))
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--project_dir', default=default_project_dir, type=str)
+parser.add_argument('--rgb', action='store_true', help='Preprocess the RGB stream')
+parser.add_argument('--flow', action='store_true', help='Preprocess the optical flow stream')
 args = parser.parse_args()
+if not args.rgb and not args.flow:
+    parser.error('Specify --rgb and/or --flow')
 
 data_dir = os.path.join(args.project_dir, 'video_dataset', 'source_data')
 out_root = os.path.join(args.project_dir, 'video_dataset', 'preprocessed_data')
@@ -47,39 +51,51 @@ num_frames = min(frame_counts)
 print(f'Using {num_frames} frames per video')
 
 # ===========================
-# 3) Resize + extract frames, save one file per frame per video
+# 3) RGB stream: resize + extract frames, save one file per frame per video
 # ===========================
-sample_video_out_dir = None
-sample_fps = 25.0
-for video_path in tqdm(video_paths, desc='Preprocessing videos'):
-    # Keep the original video's index (its filename stem) instead of renumbering it
-    video_stem = os.path.splitext(os.path.basename(video_path))[0]
-    video_out_dir = os.path.join(out_root, video_stem)
-    os.makedirs(video_out_dir, exist_ok=True)
+if args.rgb:
+    for video_path in tqdm(video_paths, desc='Preprocessing RGB stream'):
+        # Keep the original video's index (its filename stem) instead of renumbering it
+        video_stem = os.path.splitext(os.path.basename(video_path))[0]
+        video_out_dir = os.path.join(out_root, video_stem, 'rgb')
+        os.makedirs(video_out_dir, exist_ok=True)
 
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    frame_order = 0
-    while frame_order < num_frames:
-        ok, frame_bgr = cap.read()
-        if not ok:
-            break
-        # Resize to 224x224, preserve RGB, pad to keep the 1080p aspect ratio
-        i3d_frame = preprocess_frame(frame_bgr, size=TARGET_SIZE)
-        # Name each frame by the order it appears in the video
-        frame_path = os.path.join(video_out_dir, f'{frame_order:04d}.npy')
-        np.save(frame_path, i3d_frame)
-        frame_order += 1
-    cap.release()
-
-    # Remember the first video processed to build the sample video from
-    if sample_video_out_dir is None:
-        sample_video_out_dir = video_out_dir
-        sample_fps = fps
+        cap = cv2.VideoCapture(video_path)
+        frame_order = 0
+        while frame_order < num_frames:
+            ok, frame_bgr = cap.read()
+            if not ok:
+                break
+            # Resize to 224x224, preserve RGB, pad to keep the 1080p aspect ratio
+            i3d_frame = preprocess_frame(frame_bgr, size=TARGET_SIZE)
+            # Name each frame by the order it appears in the video
+            frame_path = os.path.join(video_out_dir, f'rgb_{frame_order:04d}.npy')
+            np.save(frame_path, i3d_frame)
+            frame_order += 1
+        cap.release()
+    print(f'RGB stream done: {len(video_paths)} videos -> {out_root}/<video>/rgb/')
 
 # ===========================
-# 4) Compile one video's preprocessed frames back into an mp4
+# 4) Flow stream: dense optical flow between consecutive frames
 # ===========================
-sample_save_path = os.path.join(args.project_dir, 'sample_video.mp4')
-write_video_from_frame_dir(sample_video_out_dir, sample_save_path, sample_fps)
-print(f'Sample video written to {sample_save_path}')
+if args.flow:
+    for video_path in tqdm(video_paths, desc='Preprocessing flow stream'):
+        video_stem = os.path.splitext(os.path.basename(video_path))[0]
+        video_out_dir = os.path.join(out_root, video_stem, 'flow')
+        os.makedirs(video_out_dir, exist_ok=True)
+
+        cap = cv2.VideoCapture(video_path)
+        ok, prev_frame = cap.read()
+        frame_order = 0
+        # num_frames frames -> num_frames - 1 consecutive-pair flow fields
+        while ok and frame_order < num_frames - 1:
+            ok, next_frame = cap.read()
+            if not ok:
+                break
+            flow_frame = optic_flow(prev_frame, next_frame, size=TARGET_SIZE)
+            frame_path = os.path.join(video_out_dir, f'flow_{frame_order:04d}.npy')
+            np.save(frame_path, flow_frame)
+            prev_frame = next_frame
+            frame_order += 1
+        cap.release()
+    print(f'Flow stream done: {len(video_paths)} videos -> {out_root}/<video>/flow/')

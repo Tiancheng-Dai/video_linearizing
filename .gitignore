@@ -1,5 +1,6 @@
-# Nested git repos (own remotes, not part of this project)
-kinetics_i3d_pytorch/
+# Third-party model code + pretrained weights, not part of this project
+i3d_pytorch/
+c3d_pytorch/
 .legacy/
 
 # Python
@@ -9,3 +10,5 @@ __pycache__/
 
 # Large local data, not versioned here
 video_dataset/
+eeg_dataset/
+feature_maps/
